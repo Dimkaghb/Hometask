@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.claude/
+output/
+data/test_ground_truth.jsonl
+data/generate_dataset.py
+tests/
+*.egg-info/
+dist/
+build/
+.uv/
+uv.lock
