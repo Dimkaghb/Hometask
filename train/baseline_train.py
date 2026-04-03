@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import json
+import random
 from pathlib import Path
 
 import torch
@@ -25,14 +26,14 @@ from transformers import (
 )
 
 MODEL_NAME = "Qwen/Qwen3.5-0.8B"
-LORA_R = 16
-LORA_ALPHA = 32
+LORA_R = 32
+LORA_ALPHA = 64
 LORA_DROPOUT = 0.05
-LORA_TARGET_MODULES = ["q_proj", "v_proj"]
-TRAIN_EPOCHS = 3
+LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+TRAIN_EPOCHS = 5
 TRAIN_BATCH_SIZE = 4
 TRAIN_GRAD_ACCUM = 4
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 1e-4
 WARMUP_RATIO = 0.05
 
 # Inference
@@ -43,6 +44,22 @@ SYSTEM_PROMPT = (
     "You convert natural language descriptions into structured data formats. "
     "Output only the formatted data, nothing else."
 )
+
+FORMAT_PROMPTS = {
+    "json": "Output valid JSON. Use double quotes for keys and string values. No comments or trailing commas.",
+    "yaml": "Output valid YAML. Use proper indentation. No quotes around simple strings.",
+    "xml": "Output valid XML. Use a single root element. No XML declaration.",
+    "csv": "Output valid CSV. Header row first, then data. No spaces around commas.",
+    "toml": "Output valid TOML. Use double quotes for strings. No arrays or nested tables.",
+}
+
+INPUT_PREFIXES = {
+    "json": ["JSON;", "Convert to JSON:", "Format as JSON:", "JSON format."],
+    "yaml": ["Convert to YAML:", "Format as YAML:", "YAML format.", "Output as YAML:"],
+    "xml": ["XML format.", "Convert to XML:", "Format as XML:", "Output as XML:"],
+    "csv": ["Output as CSV:", "Convert to CSV:", "CSV format.", "Format as CSV:"],
+    "toml": ["TOML —", "Convert to TOML:", "Format as TOML:", "TOML format."],
+}
 
 
 def load_training_data(data_path: str) -> list[dict]:
@@ -56,9 +73,11 @@ def load_training_data(data_path: str) -> list[dict]:
 
 def format_chat_messages(sample: dict) -> list[dict]:
     """Format a sample as chat messages for the Qwen chat template."""
+    format_name = sample.get("format", "json").lower()
+    format_prompt = FORMAT_PROMPTS.get(format_name, FORMAT_PROMPTS["json"])
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": sample["input"]},
+        {"role": "user", "content": f"{format_prompt}\n\n{sample['input']}"},
         {"role": "assistant", "content": sample["output"]},
     ]
 
@@ -144,13 +163,37 @@ def main():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # Load and tokenize data
+    # Load and tokenize data with augmentation
     print(f"Loading data from: {args.data_path}")
     raw_data = load_training_data(args.data_path)
     print(f"  {len(raw_data)} samples loaded")
 
-    tokenized = []
+    # Augment data with prompt variations
+    print("  Augmenting with prompt variations...")
+    augmented_data = []
     for sample in raw_data:
+        format_name = sample.get("format", "json").lower()
+        prefixes = INPUT_PREFIXES.get(format_name, INPUT_PREFIXES["json"])
+        
+        # Original sample
+        augmented_data.append(sample)
+        
+        # Create variations
+        if "input" in sample:
+            for prefix in prefixes[:2]:  # Add 2 variations per sample
+                parts = sample["input"].split(" ", 1)
+                if len(parts) > 1:
+                    new_input = f"{prefix} {parts[1]}"
+                    augmented_data.append({
+                        "input": new_input,
+                        "output": sample["output"],
+                        "format": sample.get("format", "json"),
+                    })
+    
+    print(f"  {len(augmented_data)} samples after augmentation")
+
+    tokenized = []
+    for sample in augmented_data:
         messages = format_chat_messages(sample)
         tok = tokenize_sample(messages, tokenizer)
         tokenized.append({

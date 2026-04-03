@@ -17,12 +17,23 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_NAME = "Qwen/Qwen3.5-0.8B"
 MAX_NEW_TOKENS = 512
+TEMPERATURE = 0.3
+TOP_K = 50
+TOP_P = 0.9
 
 # System prompt used in chat template
 SYSTEM_PROMPT = (
     "You convert natural language descriptions into structured data formats. "
     "Output only the formatted data, nothing else."
 )
+
+FORMAT_PROMPTS = {
+    "json": "Output valid JSON. Use double quotes for keys and string values. No comments or trailing commas.",
+    "yaml": "Output valid YAML. Use proper indentation. No quotes around simple strings.",
+    "xml": "Output valid XML. Use a single root element. No XML declaration.",
+    "csv": "Output valid CSV. Header row first, then data. No spaces around commas.",
+    "toml": "Output valid TOML. Use double quotes for strings. No arrays or nested tables.",
+}
 
 def load_model(lora_path: str = None) -> tuple:
     """Load base model, optionally merge LoRA weights.
@@ -65,9 +76,10 @@ def generate(model, tokenizer, prompt: str, format_name: str) -> str:
     Returns:
         The generated structured output as a string.
     """
+    format_prompt = FORMAT_PROMPTS.get(format_name.lower(), FORMAT_PROMPTS["json"])
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
+        {"role": "user", "content": f"{format_prompt}\n\n{prompt}"},
     ]
     text = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True,
@@ -78,7 +90,10 @@ def generate(model, tokenizer, prompt: str, format_name: str) -> str:
         output_ids = model.generate(
             **inputs,
             max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=False,  # Greedy — participants can experiment with sampling
+            do_sample=True,
+            temperature=TEMPERATURE,
+            top_k=TOP_K,
+            top_p=TOP_P,
             pad_token_id=tokenizer.pad_token_id,
         )
 
